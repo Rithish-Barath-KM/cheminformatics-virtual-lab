@@ -1,10 +1,13 @@
-import io
-import os
-
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
 import py3Dmol
+import streamlit.components.v1 as components
+
 from rdkit import Chem
+from rdkit.Chem import Draw, Descriptors, rdMolDescriptors
+from rdkit.Chem import AllChem
+from io import BytesIO
 
 from chem_core import (
     calculate_properties,
@@ -15,179 +18,597 @@ from chem_core import (
     get_molecule,
 )
 
+# --------------------------------------------------
+# PAGE CONFIGURATION
+# --------------------------------------------------
+
 st.set_page_config(
     page_title="Cheminformatics Virtual Laboratory",
     page_icon="🧪",
     layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-PRIMARY = "#17365D"
+# --------------------------------------------------
+# CUSTOM CSS
+# --------------------------------------------------
 
-# ---------- Header ----------
-logo_path = "srm_logo.jpeg"
-header_left, header_right = st.columns([1, 5])
+st.markdown("""
+<style>
 
-with header_left:
-    if os.path.exists(logo_path):
-        st.image(logo_path, use_container_width=True)
+.stApp {
+    background-color: #0b1120;
+    color: #e2e8f0;
+}
 
-with header_right:
-    st.title("Cheminformatics Virtual Laboratory")
-    st.caption("Explore molecular structures, calculate chemical descriptors, and generate analysis reports.")
+[data-testid="stSidebar"] {
+    background-color: #111827;
+}
+
+h1, h2, h3 {
+    color: #60a5fa;
+}
+
+p, label {
+    color: #cbd5e1;
+}
+
+.stButton > button {
+    background-color: #2563eb;
+    color: white;
+    border-radius: 8px;
+    border: none;
+    padding: 10px 20px;
+}
+
+.stButton > button:hover {
+    background-color: #1d4ed8;
+    color: white;
+}
+
+[data-testid="stMetric"] {
+    background-color: #172554;
+    padding: 15px;
+    border-radius: 12px;
+    border: 1px solid #1e40af;
+}
+
+[data-testid="stMetricValue"] {
+    color: #60a5fa;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+# --------------------------------------------------
+# HEADER
+# --------------------------------------------------
+
+st.markdown(
+    "<h1 style='text-align:center;'>🧪 CHEMINFORMATICS VIRTUAL LAB</h1>",
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    "<p style='text-align:center;'>Explore molecules, calculate chemical properties and visualize molecular structures.</p>",
+    unsafe_allow_html=True
+)
 
 st.divider()
 
-# ---------- Sidebar: student details ----------
-st.sidebar.header("Student Information")
-student_name = st.sidebar.text_input("Student name")
-registration_number = st.sidebar.text_input("Registration number")
-st.sidebar.info("Enter your details if you want them included in the PDF report.")
+# --------------------------------------------------
+# SIDEBAR
+# --------------------------------------------------
 
-# ---------- SMILES input ----------
-st.subheader("1. Enter Molecular Structure")
-st.write(
-    "Enter one SMILES string, or enter multiple SMILES strings on separate lines. "
-    "Example: `CCO` represents ethanol."
-)
+with st.sidebar:
 
-smiles_text = st.text_area(
-    "SMILES input",
-    value="CCO",
-    height=120,
-    placeholder="Enter one SMILES string per line...",
-)
+    st.title("🧪 Virtual Lab")
 
-analyze = st.button("Analyze molecule(s)", type="primary", use_container_width=True)
+    st.caption("Student Laboratory Portal")
 
-if analyze:
-    input_smiles_list = [
-        line.strip()
-        for line in smiles_text.splitlines()
-        if line.strip()
-    ]
-
-    if not input_smiles_list:
-        st.error("Please enter at least one SMILES string.")
-        st.stop()
-
-    records = []
-    invalid_smiles = []
-
-    for smiles in input_smiles_list:
-        molecule = get_molecule(smiles)
-        if molecule is None:
-            invalid_smiles.append(smiles)
-            continue
-
-        properties = calculate_properties(molecule)
-        records.append((smiles, molecule, properties))
-
-    st.session_state["molecule_records"] = records
-    st.session_state["invalid_smiles"] = invalid_smiles
-    st.session_state["student_name"] = student_name
-    st.session_state["registration_number"] = registration_number
-
-# ---------- Results ----------
-records = st.session_state.get("molecule_records", [])
-invalid_smiles = st.session_state.get("invalid_smiles", [])
-
-if invalid_smiles:
-    st.warning("These entries could not be read as valid SMILES: " + ", ".join(invalid_smiles))
-
-if records:
     st.divider()
-    st.subheader("2. Molecular Analysis")
 
-    for index, (smiles, molecule, properties) in enumerate(records, start=1):
-        with st.expander(f"Molecule {index} — {properties['Molecular Formula']}", expanded=(index == 1)):
-            st.markdown(f"**Input SMILES:** `{smiles}`")
-            st.markdown(f"**Canonical SMILES:** `{Chem.MolToSmiles(molecule)}`")
+    student_name = st.text_input(
+        "Student Name",
+        placeholder="Enter your name"
+    )
 
-            tab_2d, tab_3d, tab_properties = st.tabs(
-                ["2D Structure", "3D Structure", "Molecular Properties"]
-            )
+    registration_number = st.text_input(
+        "Registration Number",
+        placeholder="Enter registration number"
+    )
 
-            with tab_2d:
-                st.image(generate_2d_image(molecule), caption="2D molecular structure", use_container_width=True)
+    st.divider()
 
-            with tab_3d:
-                molecule_3d = generate_3d_molecule(molecule)
-                if molecule_3d is None:
-                    st.warning("A 3D conformer could not be generated for this molecule.")
+    page = st.radio(
+        "NAVIGATION",
+        [
+            "Overview",
+            "Molecule Explorer",
+            "Batch Analysis",
+            "Compare Molecules",
+            "Report Center",
+            "About the Lab"
+        ]
+    )
+
+    st.divider()
+
+    st.caption("Cheminformatics Virtual Laboratory")
+    st.caption("Educational Project")
+
+# --------------------------------------------------
+# SESSION STATE
+# --------------------------------------------------
+
+if "molecule_data" not in st.session_state:
+    st.session_state.molecule_data = []
+
+if "current_molecule" not in st.session_state:
+    st.session_state.current_molecule = None
+
+if "current_smiles" not in st.session_state:
+    st.session_state.current_smiles = ""
+    # --------------------------------------------------
+# OVERVIEW PAGE
+# --------------------------------------------------
+
+if page == "Overview":
+
+    st.subheader("Welcome to the Virtual Laboratory")
+
+    st.write(
+        "A digital chemistry laboratory designed to explore "
+        "molecular structures and chemical properties."
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Laboratory", "Active")
+
+    with col2:
+        st.metric("Analysis Mode", "Molecular")
+
+    with col3:
+        st.metric(
+            "Molecules Analysed",
+            len(st.session_state.molecule_data)
+        )
+
+    st.divider()
+
+    st.subheader("Laboratory Modules")
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.info(
+            "**Molecule Explorer**\n\n"
+            "Enter a SMILES notation and explore its molecular structure."
+        )
+
+        st.info(
+            "**Batch Analysis**\n\n"
+            "Analyse multiple molecules together."
+        )
+
+    with c2:
+        st.info(
+            "**Compare Molecules**\n\n"
+            "Compare chemical properties of different molecules."
+        )
+
+        st.info(
+            "**Report Center**\n\n"
+            "Access your molecular analysis reports."
+        )
+
+
+# --------------------------------------------------
+# MOLECULE EXPLORER
+# --------------------------------------------------
+
+elif page == "Molecule Explorer":
+
+    st.subheader("🔬 Molecule Explorer")
+
+    st.write(
+        "Enter a valid SMILES notation to analyse a molecule."
+    )
+
+    smiles = st.text_input(
+        "Enter SMILES Notation",
+        placeholder="Example: CCO"
+    )
+
+    if st.button("Analyse Molecule"):
+
+        if not smiles.strip():
+
+            st.warning("Please enter a SMILES notation.")
+
+        else:
+
+            mol = get_molecule(smiles.strip())
+
+            if mol is None:
+
+                st.error(
+                    "Invalid SMILES notation. Please check your input."
+                )
+
+            else:
+
+                st.session_state.current_molecule = mol
+                st.session_state.current_smiles = smiles.strip()
+
+                try:
+                    properties = calculate_properties(mol)
+
+                    st.session_state.molecule_data.append({
+                        "SMILES": smiles.strip(),
+                        "Properties": properties
+                    })
+
+                    st.success("Molecule analysed successfully!")
+
+                except Exception as e:
+
+                    st.error(f"Analysis error: {e}")
+
+    # DISPLAY MOLECULE
+
+    mol = st.session_state.current_molecule
+
+    if mol is not None:
+
+        st.divider()
+
+        st.subheader("Molecular Structure")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+
+            st.markdown("#### 2D Structure")
+
+            try:
+
+                image = generate_2d_image(mol)
+
+                st.image(
+                    image,
+                    caption="2D Molecular Structure",
+                    use_container_width=True
+                )
+
+            except Exception as e:
+
+                st.warning(f"2D visualization unavailable: {e}")
+
+        with col2:
+
+            st.markdown("#### 3D Structure")
+
+            try:
+
+                viewer = generate_3d_molecule(mol)
+
+                if isinstance(viewer, str):
+
+                    components.html(
+                        viewer,
+                        height=400,
+                        scrolling=False
+                    )
+
                 else:
-                    mol_block = Chem.MolToMolBlock(molecule_3d)
-                    viewer = py3Dmol.view(width=850, height=480)
-                    viewer.addModel(mol_block, "mol")
-                    viewer.setStyle({"stick": {}, "sphere": {"scale": 0.25}})
-                    viewer.setBackgroundColor("white")
-                    viewer.zoomTo()
-                    st.components.v1.html(viewer._make_html(), height=500, scrolling=False)
 
-            with tab_properties:
+                    components.html(
+                        viewer._make_html(),
+                        height=400,
+                        scrolling=False
+                    )
+
+            except Exception as e:
+
+                st.warning(f"3D visualization unavailable: {e}")
+
+        st.divider()
+
+        st.subheader("Chemical Properties")
+
+        try:
+
+            properties = calculate_properties(mol)
+
+            if isinstance(properties, dict):
+
                 property_df = pd.DataFrame(
                     list(properties.items()),
-                    columns=["Property", "Value"],
+                    columns=["Property", "Value"]
                 )
-                st.dataframe(property_df, use_container_width=True, hide_index=True)
 
-    # ---------- Downloads ----------
-    st.divider()
-    st.subheader("3. Download Your Results")
+                st.dataframe(
+                    property_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
 
-    download_left, download_right = st.columns(2)
+            else:
 
-    with download_left:
-        if len(records) == 1:
-            smiles, molecule, properties = records[0]
-            pdf_data = generate_final_report(
-                st.session_state.get("student_name", ""),
-                st.session_state.get("registration_number", ""),
-                smiles,
-                molecule,
-                properties,
+                st.write(properties)
+
+        except Exception as e:
+
+            st.error(f"Unable to display properties: {e}")
+
+        st.caption(
+            f"SMILES: {st.session_state.current_smiles}"
+        )
+        # --------------------------------------------------
+# BATCH ANALYSIS
+# --------------------------------------------------
+
+elif page == "Batch Analysis":
+
+    st.subheader("📊 Batch Molecular Analysis")
+
+    st.write("Analyse multiple molecules simultaneously.")
+
+    batch_input = st.text_area(
+        "Enter SMILES (one molecule per line)",
+        placeholder="CCO\nCC\nO\nCC(=O)O",
+        height=150
+    )
+
+    if st.button("Run Batch Analysis"):
+
+        results = []
+
+        for smiles in batch_input.splitlines():
+
+            smiles = smiles.strip()
+
+            if not smiles:
+                continue
+
+            try:
+                mol = get_molecule(smiles)
+
+                if mol is None:
+                    continue
+
+                properties = calculate_properties(mol)
+
+                row = {"SMILES": smiles}
+
+                if isinstance(properties, dict):
+                    row.update(properties)
+
+                results.append(row)
+
+            except Exception:
+                continue
+
+        if results:
+
+            batch_df = pd.DataFrame(results)
+
+            st.session_state.batch_results = batch_df
+
+            st.success(
+                f"Successfully analysed {len(results)} molecules!"
             )
-            pdf_name = "molecular_analysis_report.pdf"
+
         else:
-            pdf_data = generate_multi_final_report(
-                st.session_state.get("student_name", ""),
-                st.session_state.get("registration_number", ""),
-                records,
-            )
-            pdf_name = "multi_molecule_analysis_report.pdf"
+            st.error("No valid molecules found.")
 
-        st.download_button(
-            "Download PDF report",
-            data=pdf_data,
-            file_name=pdf_name,
-            mime="application/pdf",
+    if "batch_results" in st.session_state:
+
+        st.subheader("Batch Results")
+
+        st.dataframe(
+            st.session_state.batch_results,
             use_container_width=True,
+            hide_index=True
         )
 
-    with download_right:
-        csv_rows = []
-        for index, (smiles, molecule, properties) in enumerate(records, start=1):
-            row = {
-                "Molecule": index,
-                "Input SMILES": smiles,
-                "Canonical SMILES": Chem.MolToSmiles(molecule),
-                **properties,
-            }
-            csv_rows.append(row)
-
-        csv_buffer = io.StringIO()
-        pd.DataFrame(csv_rows).to_csv(csv_buffer, index=False)
+        csv = st.session_state.batch_results.to_csv(
+            index=False
+        ).encode("utf-8")
 
         st.download_button(
-            "Download CSV data",
-            data=csv_buffer.getvalue(),
-            file_name="molecular_properties.csv",
-            mime="text/csv",
-            use_container_width=True,
+            "⬇️ Download CSV",
+            csv,
+            "batch_analysis.csv",
+            "text/csv"
         )
 
-else:
-    st.info("Enter a SMILES string above and select **Analyze molecule(s)** to see the results.")
 
-# ---------- Footer ----------
+# --------------------------------------------------
+# COMPARE MOLECULES
+# --------------------------------------------------
+
+elif page == "Compare Molecules":
+
+    st.subheader("⚖️ Compare Molecules")
+
+    st.write(
+        "Enter two SMILES notations to compare their properties."
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        smiles1 = st.text_input(
+            "First Molecule",
+            placeholder="CCO"
+        )
+
+    with col2:
+        smiles2 = st.text_input(
+            "Second Molecule",
+            placeholder="CC(=O)O"
+        )
+
+    if st.button("Compare"):
+
+        if not smiles1.strip() or not smiles2.strip():
+
+            st.warning("Enter both SMILES notations.")
+
+        else:
+
+            mol1 = get_molecule(smiles1.strip())
+            mol2 = get_molecule(smiles2.strip())
+
+            if mol1 is None or mol2 is None:
+
+                st.error("One or both SMILES notations are invalid.")
+
+            else:
+
+                try:
+
+                    prop1 = calculate_properties(mol1)
+                    prop2 = calculate_properties(mol2)
+
+                    if isinstance(prop1, dict) and isinstance(prop2, dict):
+
+                        comparison = pd.DataFrame({
+                            "Property": list(prop1.keys()),
+                            "Molecule 1": list(prop1.values()),
+                            "Molecule 2": [
+                                prop2.get(key, "N/A")
+                                for key in prop1.keys()
+                            ]
+                        })
+
+                        st.success("Comparison completed!")
+
+                        st.dataframe(
+                            comparison,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+
+                    else:
+                        st.error("Property comparison is unavailable.")
+
+                except Exception as e:
+
+                    st.error(f"Comparison error: {e}")
+
+
+# --------------------------------------------------
+# REPORT CENTER
+# --------------------------------------------------
+
+elif page == "Report Center":
+
+    st.subheader("📄 Report Center")
+
+    st.write(
+        "View and export your molecular analysis history."
+    )
+
+    if st.session_state.molecule_data:
+
+        report_data = []
+
+        for item in st.session_state.molecule_data:
+
+            row = {"SMILES": item["SMILES"]}
+
+            if isinstance(item["Properties"], dict):
+                row.update(item["Properties"])
+
+            report_data.append(row)
+
+        report_df = pd.DataFrame(report_data)
+
+        st.dataframe(
+            report_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        csv_data = report_df.to_csv(
+            index=False
+        ).encode("utf-8")
+
+        st.download_button(
+            "⬇️ Download Analysis History",
+            csv_data,
+            "molecule_history.csv",
+            "text/csv"
+        )
+
+    else:
+
+        st.info(
+            "No analysis history available. "
+            "Analyse a molecule first."
+        )
+
+
+# --------------------------------------------------
+# ABOUT THE LAB
+# --------------------------------------------------
+
+elif page == "About the Lab":
+
+    st.subheader("🧪 About Cheminformatics Virtual Laboratory")
+
+    st.write("""
+    The Cheminformatics Virtual Laboratory is an educational
+    application designed to explore molecular structures and
+    understand chemical properties using computational tools.
+    """)
+
+    st.markdown("### Laboratory Features")
+
+    st.markdown("""
+    - Molecular SMILES input
+    - 2D molecular visualization
+    - 3D molecular visualization
+    - Chemical property calculations
+    - Batch molecular analysis
+    - Molecule comparison
+    - CSV report generation
+    """)
+
+    st.markdown("### Technologies Used")
+
+    st.markdown("""
+    - Python
+    - Streamlit
+    - RDKit
+    - Pandas
+    - Matplotlib
+    - Py3Dmol
+    """)
+
+    st.divider()
+
+    st.caption("Cheminformatics Virtual Laboratory")
+    st.caption("Educational Project")
+
+
+# --------------------------------------------------
+# FOOTER
+# --------------------------------------------------
+
 st.divider()
-st.caption("Educational tool: calculated molecular descriptors are computational estimates and should be interpreted alongside experimental data.")
+
+st.markdown(
+    """
+    <div style="text-align:center; color:#64748b;">
+        Cheminformatics Virtual Laboratory |
+        Powered by Python and Streamlit
+    </div>
+    """,
+    unsafe_allow_html=True
+)

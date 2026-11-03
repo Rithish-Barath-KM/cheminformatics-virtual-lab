@@ -3,3 +3,4 @@ pandas
 matplotlib
 rdkit
 reportlab
+py3Dmol

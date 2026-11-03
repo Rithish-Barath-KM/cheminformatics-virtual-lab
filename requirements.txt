@@ -1,6 +1,7 @@
 streamlit>=1.41
 pandas
 matplotlib
+numpy
 rdkit
 reportlab
 py3Dmol

@@ -1,6 +1,5 @@
 # ==================================================
 # CHEMINFORMATICS VIRTUAL LABORATORY  —  app.py
-# Fixed + enhanced UI edition
 # ==================================================
 
 import streamlit as st
@@ -8,16 +7,14 @@ import pandas as pd
 import streamlit.components.v1 as components
 from io import BytesIO
 
-# ---- RDKit (guarded so a bad import shows a friendly message) ----
 try:
     from rdkit import Chem
     from rdkit.Chem import Draw
     RDKIT_AVAILABLE = True
-except Exception as _e:  # pragma: no cover
+except Exception as _e:
     RDKIT_AVAILABLE = False
     RDKIT_ERROR = str(_e)
 
-# ---- Your backend module ----
 from chem_core import (
     calculate_properties,
     generate_2d_image,
@@ -27,9 +24,6 @@ from chem_core import (
     get_molecule,
 )
 
-# --------------------------------------------------
-# PAGE CONFIG
-# --------------------------------------------------
 st.set_page_config(
     page_title="Cheminformatics Virtual Laboratory",
     page_icon="🧪",
@@ -37,9 +31,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --------------------------------------------------
-# THEME / CSS
-# --------------------------------------------------
 st.markdown(
     """
 <style>
@@ -63,7 +54,6 @@ st.markdown(
 h1, h2, h3, h4 { color: #60a5fa; }
 p, label, span { color: #cbd5e1; }
 
-/* Inputs */
 .stTextInput > div > div > input,
 .stTextArea > div > textarea {
     background-color: #0f172a !important;
@@ -72,7 +62,6 @@ p, label, span { color: #cbd5e1; }
     border-radius: 8px !important;
 }
 
-/* Buttons */
 .stButton > button,
 .stDownloadButton > button {
     background-color: var(--accent);
@@ -89,7 +78,6 @@ p, label, span { color: #cbd5e1; }
     transform: translateY(-1px);
 }
 
-/* Metrics */
 [data-testid="stMetric"] {
     background-color: var(--panel-2);
     padding: 16px;
@@ -99,19 +87,16 @@ p, label, span { color: #cbd5e1; }
 [data-testid="stMetricValue"] { color: #60a5fa; font-weight: 700; }
 [data-testid="stMetricLabel"] { color: #cbd5e1; }
 
-/* Dataframe container */
 [data-testid="stDataFrame"] {
     border: 1px solid var(--border);
     border-radius: 10px;
     overflow: hidden;
 }
 
-/* Info / success / warning / error cards */
 [data-testid="stAlert"] {
     border-radius: 10px;
 }
 
-/* Card helper */
 .lab-card {
     background: #0f172a;
     border: 1px solid var(--border);
@@ -122,7 +107,6 @@ p, label, span { color: #cbd5e1; }
 .lab-card h4 { margin: 0 0 6px 0; color: #93c5fd; }
 .lab-card p  { margin: 0; color: #cbd5e1; font-size: 0.95rem; }
 
-/* Hero */
 .hero {
     background: linear-gradient(135deg,#1e3a8a 0%,#0b1120 100%);
     border: 1px solid var(--border);
@@ -134,7 +118,6 @@ p, label, span { color: #cbd5e1; }
 .hero h1 { margin: 0; font-size: 2.1rem; letter-spacing: .5px; }
 .hero p  { margin: 8px 0 0 0; color: #cbd5e1; }
 
-/* Footer */
 .footer {
     text-align: center;
     color: var(--muted);
@@ -148,11 +131,8 @@ p, label, span { color: #cbd5e1; }
     unsafe_allow_html=True,
 )
 
-# --------------------------------------------------
-# SESSION STATE  (single source of truth)
-# --------------------------------------------------
 DEFAULTS = {
-    "molecule_data": [],          # list[{"SMILES": str, "Properties": dict}]
+    "molecule_data": [],
     "current_molecule": None,
     "current_smiles": "",
     "current_properties": None,
@@ -166,7 +146,6 @@ for k, v in DEFAULTS.items():
 
 
 def _add_to_history(smiles: str, properties: dict) -> None:
-    """Add a molecule to history only if not already present (by SMILES)."""
     existing = {row["SMILES"] for row in st.session_state.molecule_data}
     if smiles not in existing:
         st.session_state.molecule_data.append(
@@ -174,9 +153,6 @@ def _add_to_history(smiles: str, properties: dict) -> None:
         )
 
 
-# --------------------------------------------------
-# HEADER
-# --------------------------------------------------
 st.markdown(
     """
 <div class="hero">
@@ -187,9 +163,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --------------------------------------------------
-# SIDEBAR
-# --------------------------------------------------
 with st.sidebar:
     st.title("🧪 Virtual Lab")
     st.caption("Student Laboratory Portal")
@@ -223,7 +196,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Live status
     if st.session_state.student_name:
         st.success(f"👤 {st.session_state.student_name}")
     else:
@@ -234,9 +206,6 @@ with st.sidebar:
     st.caption("Cheminformatics Virtual Laboratory")
     st.caption("Educational Project")
 
-# --------------------------------------------------
-# HARD GUARD: RDKit missing
-# --------------------------------------------------
 if not RDKIT_AVAILABLE:
     st.error(
         "RDKit could not be imported. Please ensure `rdkit` is listed in "
@@ -246,9 +215,6 @@ if not RDKIT_AVAILABLE:
     st.stop()
 
 
-# ==================================================
-# PAGE : OVERVIEW
-# ==================================================
 if page == "Overview":
     st.subheader("Welcome to the Virtual Laboratory")
     st.write(
@@ -291,7 +257,6 @@ if page == "Overview":
             unsafe_allow_html=True,
         )
 
-    # Quick-start samples
     st.divider()
     st.subheader("Quick Start — Try a Sample")
     samples = {
@@ -314,9 +279,6 @@ if page == "Overview":
                     st.session_state["_nav_to"] = "Molecule Explorer"
 
 
-# ==================================================
-# PAGE : MOLECULE EXPLORER
-# ==================================================
 elif page == "Molecule Explorer":
     st.subheader("🔬 Molecule Explorer")
     st.write("Enter a valid SMILES notation to analyse a molecule.")
@@ -359,14 +321,12 @@ elif page == "Molecule Explorer":
                 except Exception as e:
                     st.error(f"Analysis error: {e}")
 
-    # ---- Display ----
     mol = st.session_state.current_molecule
     if mol is not None:
         st.divider()
         st.subheader("Molecular Structure")
         col1, col2 = st.columns(2)
 
-        # 2D
         with col1:
             st.markdown("#### 2D Structure")
             try:
@@ -375,7 +335,6 @@ elif page == "Molecule Explorer":
             except Exception as e:
                 st.warning(f"2D visualisation unavailable: {e}")
 
-        # 3D — try multiple ways of getting HTML (public → private)
         with col2:
             st.markdown("#### 3D Structure")
             try:
@@ -414,9 +373,6 @@ elif page == "Molecule Explorer":
         st.caption(f"SMILES: `{st.session_state.current_smiles}`")
 
 
-# ==================================================
-# PAGE : BATCH ANALYSIS
-# ==================================================
 elif page == "Batch Analysis":
     st.subheader("📊 Batch Molecular Analysis")
     st.write("Analyse multiple molecules simultaneously.")
@@ -476,9 +432,6 @@ elif page == "Batch Analysis":
         )
 
 
-# ==================================================
-# PAGE : COMPARE MOLECULES
-# ==================================================
 elif page == "Compare Molecules":
     st.subheader("⚖️ Compare Molecules")
     st.write("Enter two SMILES notations to compare their properties.")
@@ -515,7 +468,6 @@ elif page == "Compare Molecules":
                         )
                         st.success("Comparison completed!")
 
-                        # Preview both structures side by side
                         st.divider()
                         ic1, ic2 = st.columns(2)
                         with ic1:
@@ -543,15 +495,11 @@ elif page == "Compare Molecules":
                     st.error(f"Comparison error: {e}")
 
 
-# ==================================================
-# PAGE : REPORT CENTER
-# ==================================================
 elif page == "Report Center":
     st.subheader("📄 Report Center")
     st.write("View and export your molecular analysis history.")
 
     if st.session_state.molecule_data:
-        # Build report dataframe once
         rows = []
         for item in st.session_state.molecule_data:
             row = {"SMILES": item["SMILES"]}
@@ -580,9 +528,6 @@ elif page == "Report Center":
         st.info("No analysis history available. Analyse a molecule first.")
 
 
-# ==================================================
-# PAGE : ABOUT
-# ==================================================
 elif page == "About the Lab":
     st.subheader("🧪 About Cheminformatics Virtual Laboratory")
     st.write(
@@ -622,9 +567,6 @@ elif page == "About the Lab":
     st.caption("Educational Project")
 
 
-# --------------------------------------------------
-# FOOTER
-# --------------------------------------------------
 st.markdown(
     '<div class="footer">Cheminformatics Virtual Laboratory &nbsp;•&nbsp; '
     "Powered by Python &amp; Streamlit</div>",
